@@ -1,2 +1,2 @@
-# SIMS---Forsakringskassan
+# SIMS-Forsakringskassan
 AI project for Forsakringskassan
