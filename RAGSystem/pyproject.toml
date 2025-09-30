@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-bot"
+version = "0.1.0"
+description = "A simple RAG (Retrieval-Augmented Generation) chatbot using LangChain."
+authors = [
+  { name = "Axel Friman", email = "axelfriman04@gmail.com" }
+]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+  "beautifulsoup4",
+  "sentence-transformers",
+  "langgraph"
+]
