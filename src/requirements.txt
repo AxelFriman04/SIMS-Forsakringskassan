@@ -1,0 +1,4 @@
+openai
+qdrant-client
+pydantic-settings
+pymupdf
