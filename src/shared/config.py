@@ -1,9 +1,16 @@
+import os
+
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
+
 
 class Settings(BaseSettings):
-    VECTOR_DB_URL: str = ""  # Qdrant default
-    VECTOR_DB_COLLECTION: str = "test_run"
-    OPENAI_API_KEY: str = "..."
+    VECTOR_DB_URL: str = os.getenv("VECTOR_DB_URL")  # Qdrant default
+    VECTOR_DB_COLLECTION: str = os.getenv("VECTOR_DB_COLLECTION")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     EMBED_DIM: int = 1536  # for the text-embedding-3-small model
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     LLM_MODEL: str = "gpt-5-nano"
