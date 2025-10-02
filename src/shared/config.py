@@ -1,7 +1,7 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    VECTOR_DB_URL: str = "http://192.168.0.111:6333"  # Qdrant default
+    VECTOR_DB_URL: str = ""  # Qdrant default
     VECTOR_DB_COLLECTION: str = "test_run"
     OPENAI_API_KEY: str = "..."
     EMBED_DIM: int = 1536  # for the text-embedding-3-small model
