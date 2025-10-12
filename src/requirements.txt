@@ -1,4 +1,28 @@
-openai
-qdrant-client
-pydantic-settings
-pymupdf
+# Core LLM & RAG libraries
+openai>=1.45.0,<2.0.0
+# langchain>=0.3.0,<0.4.0
+# langgraph>=0.2.18,<0.3.0
+qdrant-client>=1.10.0,<2.0.0
+
+# Data handling & parsing
+pydantic>=2.7.0,<3.0.0
+pydantic-settings>=2.3.0,<3.0.0
+numpy>=1.26.0,<2.0.0
+pandas>=2.2.0,<3.0.0
+
+# PDF and document ingestion
+PyMuPDF>=1.24.0,<2.0.0
+
+# Utilities and async operations
+tqdm>=4.66.0,<5.0.0
+# requests>=2.32.0,<3.0.0
+
+# Model serving / frontend
+# streamlit>=1.38.0,<2.0.0
+
+# Optional: evaluation and reporting (useful for compliance scoring)
+scikit-learn>=1.4.0,<2.0.0
+# scipy>=1.12.0,<2.0.0
+
+# Optional: environment & debugging
+python-dotenv>=1.0.0,<2.0.0

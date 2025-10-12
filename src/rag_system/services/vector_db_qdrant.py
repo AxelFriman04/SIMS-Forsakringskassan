@@ -74,7 +74,7 @@ class VectorDBClient:
         Returns list of dicts compatible with RetrievalOutput.
         """
         top_k = top_k or settings.TOP_K
-        hits = self.client.search(
+        hits = self.client.search(  # TODO: Update this to use query_points method
             collection_name=self.collection_name,
             query_vector=q_vector,
             limit=top_k,
