@@ -1,23 +1,80 @@
 # compliance_checker/graph/compile_graph.py
-
+import sqlite3
+from shared.config import settings
+from shared.services.result_store import ResultsDBClient
 from compliance_checker.graph.state import GraphState
+from compliance_checker.graph.nodes.style_evaluator import StyleEvaluatorNode
 from compliance_checker.graph.nodes.claim_extractor import ClaimExtractorNode
 from compliance_checker.graph.nodes.evidence_checker import EvidenceCheckerNode
 from compliance_checker.graph.nodes.root_cause_classifier import RootCauseClassifierNode
 from compliance_checker.graph.nodes.compliance_report import ComplianceReportNode
-from compliance_checker.services.results_db_client import ResultsDBClient
-from dataclasses import asdict
-from shared.config import settings
-import sqlite3
-import json
 
 
+def run_compliance_pipeline(answer_text: str, dry_run: bool = False) -> GraphState:
+    """Run full compliance pipeline."""
+    state = GraphState()
+
+    # --- #1 Style Evaluation ---
+    print("\n=== Step 1: Style Evaluation ===")
+    style_node = StyleEvaluatorNode(state)
+    state = style_node.run(answer_text)
+
+    # --- #2 Claim Extraction ---
+    extractor = ClaimExtractorNode(state)
+    state = extractor.run(answer_text, dry_run=dry_run)
+
+    # --- #3 Evidence Verification ---
+    verifier = EvidenceCheckerNode()
+    state = verifier.run(state)
+
+    return state
+
+
+if __name__ == "__main__":
+    # --- Load latest RAG answer ---
+    conn = sqlite3.connect(settings.DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, answer FROM results ORDER BY id DESC LIMIT 1")
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        print("No sample answer found in DB.")
+        exit()
+
+    answer_id, sample_answer = row
+    db_client = ResultsDBClient()
+
+    try:
+        print("\n=== Running Compliance Pipeline ===")
+        compliance_state = run_compliance_pipeline(sample_answer, dry_run=False)
+
+        # Store metrics + claims
+        db_client.update_compliance_results(answer_id, compliance_state)
+
+        # Root cause + report generation
+        print("\n=== Running Root Cause Classifier ===")
+        root_cause_node = RootCauseClassifierNode(compliance_state)
+        verdict_state = root_cause_node.run(answer_id)
+
+        print("\n=== Building Compliance Report ===")
+        compliance_node = ComplianceReportNode(verdict_state)
+        report = compliance_node.run()
+
+        # Store report in DB
+        db_client.update_compliance_report(answer_id, report)
+        print(f"\n✅ Compliance report stored for record ID {answer_id}")
+
+    except Exception as e:
+        print(f"[ERROR] Compliance pipeline failed: {e}")
+
+"""
 def run_compliance_pipeline(answer_text: str, dry_run: bool = False):
-    """
+    """ """
     Runs the full compliance pipeline:
       1. Claim Extraction
       2. Evidence Verification (Entailment Checking)
-    """
+    """ """
 
     if getattr(settings, "DEBUG", False):
         print("=== Running Compliance Pipeline ===")
@@ -104,4 +161,4 @@ if __name__ == "__main__":
         report = compliance_node.run()
 
     except Exception as e:
-        print(f"[ERROR] Compliance pipeline failed: {e}")
+        print(f"[ERROR] Compliance pipeline failed: {e}")"""

@@ -15,6 +15,7 @@ class GraphState:
     metrics_generation: Dict[str, Any] = field(default_factory=dict)
     query: str = ""
     answer: str = ""
+    result_id: int = None
 
     def log_metric(self, metric: Dict[str, Any]):
         """

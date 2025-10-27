@@ -14,10 +14,10 @@ class LLM:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: Optional[str] = settings.OPENAI_API_KEY,
         model: Optional[str] = None,
     ):
-        self.client = OpenAI(api_key=api_key or settings.OPENAI_API_KEY)
+        self.client = OpenAI(api_key=api_key)
         self.model = model or settings.LLM_MODEL
 
     def complete(
@@ -71,7 +71,7 @@ class LLM:
                 response_kwargs["response_format"] = {
                     "type": "json_schema",
                     "json_schema": {
-                        "name": "verification",  # <-- must be inside json_schema
+                        "name": schema.get("name", "structured_output"),
                         "strict": True,
                         "schema": schema  # <-- your schema dict
                     }

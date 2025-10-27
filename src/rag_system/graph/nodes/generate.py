@@ -4,7 +4,7 @@ import re
 import statistics
 from rag_system.model.llm import LLM
 from rag_system.graph.state import GraphState
-from rag_system.prompt.prompt_loader import compose_generation_prompt
+from rag_system.prompt.prompt_loader import load_generation_prompt, load_generator_system_prompt
 import tiktoken
 
 
@@ -64,7 +64,8 @@ class GenerateNode:
         self.state.query = query
 
         # 1. Build prompt
-        prompt = compose_generation_prompt(query, retrieval_snapshot)
+        prompt = load_generation_prompt(query, retrieval_snapshot)
+        system_prompt = load_generator_system_prompt()
 
         # 2. Count tokens
         total_prompt_tokens = self.count_tokens(prompt, model=self.llm.model)
@@ -85,9 +86,8 @@ class GenerateNode:
             }
         else:
             # 3. Call LLM normally
-            gen = self.llm.complete(prompt, max_tokens=16000)
+            gen = self.llm.complete(prompt, max_tokens=16000, system_prompt=system_prompt)
 
-        # 2. Call LLM
         # max_tokens = self.compute_max_tokens(retrieval_snapshot)
         # gen = self.llm.complete(prompt, max_tokens=max_tokens)
         # gen = self.llm.complete(prompt)
@@ -97,8 +97,8 @@ class GenerateNode:
 
         # 3. Compute M3 metrics
         m3_metrics = self._compute_m3_metrics(answer, gen, retrieval_snapshot)
-        self.state.metrics_generation = m3_metrics
-
+        # self.state.metrics_generation = m3_metrics
+        self.state.log_metric(m3_metrics)
 
         return gen
 
@@ -108,7 +108,6 @@ class GenerateNode:
         - token_logprob_stats: average/min/count from logprobs
         - generator_declared_citations: citations found in answer
         - answer_length: char length
-        - claim_count: heuristic based on sentence punctuation
         - preliminary_hallucinations_warnings: checks missing/invalid citations
         """
 
@@ -121,9 +120,6 @@ class GenerateNode:
         # declared_citations = re.findall(r"\[CITE:\s*(\w+)\]", answer)
         declared_citations = re.findall(r"\[CITE:\s*([^\]]+)\]", answer)
 
-        # claim count heuristic = number of sentences
-        claim_count = answer.count(".") + answer.count("!") + answer.count("?")
-
         # hallucination warnings
         valid_chunk_ids = {str(r["chunk_id"]) for r in retrieval_snapshot.get("topk", [])}
         hallucination_warnings = []
@@ -133,6 +129,7 @@ class GenerateNode:
             hallucination_warnings.append("Citations reference non-retrieved chunks.")
 
         return {
+            "type": "generation",
             "token_logprob_stats": {
                 "avg": avg_logprob,
                 "min": min_logprob,
@@ -140,6 +137,5 @@ class GenerateNode:
             },
             "generator_declared_citations": declared_citations,
             "answer_length": len(answer),
-            "claim_count": claim_count,
             "preliminary_hallucinations_warnings": hallucination_warnings
         }

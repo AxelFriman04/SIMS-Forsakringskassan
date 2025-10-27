@@ -1,187 +1,263 @@
 # compliance_checker/prompt/prompt_loader.py
+from shared.config import settings
+
+
+def load_style_evaluation_prompt(answer_text: str) -> str:
+    """
+    Composes the LLM prompt for evaluating tone, clarity, and register consistency.
+    """
+
+    if getattr(settings, "PDF_LANG_IS_SWE", False):
+        language_instruction = (
+            "Analysera texten på svenska. Bedöm om den har en formell, neutral och tydlig myndighetston. "
+            "Om texten är otydlig, informell eller innehåller spekulationer – markera det."
+        )
+    else:
+        language_instruction = (
+            "Analyze the text in English. Assess whether it has a formal, neutral, and clear professional tone. "
+            "If it is unclear, informal, or speculative, flag accordingly."
+        )
+
+    return f"""
+You are an expert linguistic evaluator.
+
+Your task is to analyze the following RAG-generated answer and assess:
+
+1. **Tone** — choose one: ["formal", "neutral", "informal", "speculative", "unclear"]
+2. **Clarity Score** — a number between 0 and 1 (1 = very clear and precise)
+3. **Register Consistency** — a number between 0 and 1 (1 = tone is consistent and professional throughout)
+4. **Notes** — short comments explaining the reasoning.
+
+{language_instruction}
+
+Analyze the text below and produce structured output following the schema exactly.
+
+Answer:
+\"\"\"{answer_text}\"\"\"
+"""
+
+
+def load_style_evaluator_system_prompt() -> str:
+    """System prompt for the StyleEvaluatorNode."""
+    from shared.config import settings
+
+    if getattr(settings, "PDF_LANG_IS_SWE", False):
+        return (
+            "Du är en språklig utvärderingsassistent specialiserad på myndighetstexter. "
+            "Ditt uppdrag är att analysera **ton**, **språklig klarhet** och **registerkonsekvens** "
+            "i svar som genererats av ett språkmodellssystem. "
+            "Bedömningen ska göras strikt objektivt – du ska inte omformulera eller förbättra texten, "
+            "endast analysera dess språkliga egenskaper.\n\n"
+            "Ditt mål är att identifiera om texten är formell, neutral och tydlig, "
+            "eller om den innehåller spekulativa, oklara eller informella drag."
+        )
+    else:
+        return (
+            "You are a linguistic evaluation assistant specialized in official and professional writing. "
+            "Your role is to assess the **tone**, **clarity**, and **register consistency** "
+            "of a model-generated answer. "
+            "You must not rewrite or edit the text – only evaluate it objectively.\n\n"
+            "Your goal is to determine whether the text maintains a formal, neutral, and clear style, "
+            "or whether it contains informal, speculative, or unclear elements."
+        )
+
 
 def load_claim_extraction_prompt(answer_text: str) -> str:
     """
-    Compose the system + user prompt for claim extraction.
-    The LLM should output a JSON array of atomic factual claims.
+    Compose user prompt for claim extraction.
+    Adapts to Swedish or English language depending on config.
+    Works with structured JSON output (schema-enforced).
     """
+
+    # Language control
+    if getattr(settings, "PDF_LANG_IS_SWE", False):
+        language_instruction = (
+            "Extrahera påståenden på svenska. "
+            "Behåll originalformuleringens ton och betydelse. "
+            "Hoppa över fraser som enbart anger att information saknas eller att något inte kan bedömas."
+        )
+        tone_instruction = (
+            "Skriv neutralt och sakligt i stil med Försäkringskassans vägledningar."
+        )
+    else:
+        language_instruction = (
+            "Extract the claims in English, preserving the factual tone and meaning. "
+            "Skip phrases that only express missing or unavailable information."
+        )
+        tone_instruction = (
+            "Maintain a neutral and factual style, suitable for an official report."
+        )
+
     return f"""
-You are a factual claim extraction assistant.
+You are an expert factual analysis assistant that extracts **independent, verifiable factual claims**
+from a RAG-generated answer.
 
-Your task is to read the following answer and extract all **independent, verifiable factual claims**.
+The text may include citation markers like `[CITE: <id>]`. 
+These indicate which source supported a part of the text — they should **not** be included in the claim text.
 
-- Each claim must represent one distinct fact that can be checked independently.
-- Do NOT merge multiple claims into one sentence.
-- Output a **JSON array** where each element is an object with one field:
-  "text": "<claim>"
+Your task:
+- Identify each **distinct, checkable factual statement**.
+- Each claim must represent **only one** factual proposition.
+- Exclude vague or speculative sentences and those saying information is unavailable.
+- Maintain a clear, factual, and neutral tone.
 
-Example output:
+The output will be validated against a **structured JSON schema**, not parsed from text.
+You do **not** need to format JSON manually — just produce the structured data that fits the schema.
+
+{language_instruction}
+{tone_instruction}
+
+Example structured output (for illustration only):
 [
   {{ "text": "Water boils at 100°C at sea level." }},
   {{ "text": "Ice melts at 0°C." }}
 ]
 
-Answer to analyze:
+Analyze the following answer and extract all factual claims:
+
 \"\"\"{answer_text}\"\"\"
 """
 
 
-def load_entailment_prompt_old(premise: str, hypothesis: str) -> str:
-    """
-    Compose the system + user prompt for the Evidence Checker node.
-    The LLM should classify the relationship between the provided evidence (premise)
-    and the claim (hypothesis) as ENTAILMENT, CONTRADICTION, or NEUTRAL.
-    """
-    return f"""
-You are a factual verification expert.
+def load_claim_extractor_system_prompt() -> str:
+    """System prompt for the ClaimExtractorNode."""
+    from shared.config import settings
 
-Your task is to analyze whether the given **evidence** (premise)
-supports, contradicts, or is unrelated to the **claim** (hypothesis).
-
-Respond strictly in JSON format with the following fields:
-- "label": one of ["entailment", "contradiction", "neutral"]
-- "confidence": a float between 0 and 1 indicating your confidence in this classification.
-
-Examples:
-
-Evidence: "Water freezes at 0°C under normal conditions."
-Claim: "Water becomes solid at 0°C."
-Output:
-{{"label": "entailment", "confidence": 0.97}}
-
-Evidence: "The Earth revolves around the Sun."
-Claim: "The Sun revolves around the Earth."
-Output:
-{{"label": "contradiction", "confidence": 1.0}}
-
-Evidence: "The Moon has craters."
-Claim: "The Moon is made of cheese."
-Output:
-{{"label": "neutral", "confidence": 0.99}}
-
-Now analyze:
-
-Evidence: \"\"\"{premise}\"\"\"
-Claim: \"\"\"{hypothesis}\"\"\"
-"""
+    if getattr(settings, "PDF_LANG_IS_SWE", False):
+        return (
+            "Du är en juridisk och språklig analysassistent med expertis inom svenska myndighetstexter. "
+            "Ditt uppdrag är att identifiera **självständiga, verifierbara påståenden** i en given text. "
+            "Varje påstående ska kunna kontrolleras mot källmaterial, "
+            "och får inte innehålla flera fakta i samma mening. "
+            "Du ska inte tolka, förklara eller lägga till information – "
+            "endast extrahera de rena faktapåståendena så som de står uttryckta."
+        )
+    else:
+        return (
+            "You are a legal and linguistic analysis assistant specializing in factual decomposition. "
+            "Your job is to identify **independent, verifiable factual statements** within a given text. "
+            "Each claim must be self-contained, checkable, and atomic. "
+            "Do not interpret, summarize, or add information — extract only the factual statements as written."
+        )
 
 
 def load_entailment_prompt(premise: str, hypothesis: str) -> str:
     """
-    Compose the system + user prompt for the Evidence Checker node
-    using structured output.
+    Compose the prompt for single claim verification.
+    Adapts to Swedish or English.
+    Structured output enforced via JSON schema.
     """
+
+    if getattr(settings, "PDF_LANG_IS_SWE", False):
+        language_instruction = (
+            "Analysera sambandet mellan bevistexten (evidens) och påståendet. "
+            "Klassificera om beviset **stödjer**, **motsäger** eller **inte är relaterat till** påståendet."
+        )
+    else:
+        language_instruction = (
+            "Analyze the relationship between the evidence and the claim. "
+            "Classify whether the evidence **supports**, **contradicts**, or is **unrelated** to the claim."
+        )
+
     return f"""
-You are a factual verification expert.
+You are a precise factual verification expert.
 
-Your task:
-Analyze whether the given **evidence** (premise) supports, contradicts,
-or is unrelated to the **claim** (hypothesis).
+Your goal is to determine how well the provided **evidence** supports the **claim**.
 
-Return an object exactly following this schema:
+Follow this classification scheme:
+- "entailment" → The evidence directly supports or confirms the claim.
+- "contradiction" → The evidence directly contradicts the claim.
+- "neutral" → The evidence is unrelated or insufficient.
+
+Return a structured object with:
 - label: one of ["entailment", "contradiction", "neutral"]
-- confidence: a float between 0 and 1
+- confidence: a float between 0 and 1 indicating certainty.
 
 Examples:
-
 Evidence: "Water freezes at 0°C under normal conditions."
 Claim: "Water becomes solid at 0°C."
-Output:
-{{"label": "entailment", "confidence": 0.97}}
+→ {{ "label": "entailment", "confidence": 0.97 }}
 
 Evidence: "The Earth revolves around the Sun."
 Claim: "The Sun revolves around the Earth."
-Output:
-{{"label": "contradiction", "confidence": 1.0}}
+→ {{ "label": "contradiction", "confidence": 1.0 }}
 
 Evidence: "The Moon has craters."
 Claim: "The Moon is made of cheese."
-Output:
-{{"label": "neutral", "confidence": 0.99}}
+→ {{ "label": "neutral", "confidence": 0.99 }}
 
-Now analyze the following evidence and claim, and return the object strictly following the schema:
+{language_instruction}
 
-Evidence: \"\"\"{premise}\"\"\"
-Claim: \"\"\"{hypothesis}\"\"\"
-"""
+Now analyze the following pair:
 
-def load_entailment_batch_prompt(pairs: list[dict]) -> str:
-    """
-    Compose a prompt for verifying multiple (evidence, claim) pairs at once.
-    Each pair should have keys: 'premise' and 'hypothesis'.
-    """
-    formatted_pairs = "\n".join(
-        [f"{i+1}. Evidence: \"\"\"{p['premise']}\"\"\"\n   Claim: \"\"\"{p['hypothesis']}\"\"\"" for i, p in enumerate(pairs)]
-    )
+Evidence:
+\"\"\"{premise}\"\"\"
 
-    return f"""
-You are a factual verification expert.
-
-You will receive several (evidence, claim) pairs. 
-For each pair, decide whether the **claim** is ENTAILED by, CONTRADICTED by, or NEUTRAL toward the **evidence**.
-
-Respond strictly in **JSON array** form, where each element corresponds to the same index in order.
-
-Each element must be an object:
-{{
-  "label": one of ["entailment", "contradiction", "neutral"],
-  "confidence": a float between 0 and 1
-}}
-
-Example output:
-[
-  {{"label": "entailment", "confidence": 0.97}},
-  {{"label": "neutral", "confidence": 0.88}}
-]
-
-Now analyze these pairs:
-
-{formatted_pairs}
+Claim:
+\"\"\"{hypothesis}\"\"\"
 """
 
 
-def load_entailment_batch_prompt_v2(evidence_texts: dict, pairs: list[dict]) -> str:
+def load_entailment_batch_prompt(evidence_texts: dict, pairs: list[dict]) -> str:
+    """
+    Build the entailment batch prompt for multiple claims.
+    Each claim may reference one or more evidence segments.
+    Adapts to Swedish or English and uses structured JSON output.
+    """
+
+    # Format evidence texts
     formatted_evidence = "\n".join(
-        [f"{ref}: \"\"\"{text}\"\"\"" for ref, text in evidence_texts.items()]
+        [f"{ref}: \"\"\"{text.strip()}\"\"\"" for ref, text in evidence_texts.items()]
     )
 
-    formatted_pairs = "\n".join(
-        [f"{i+1}. Claim: \"\"\"{p['hypothesis']}\"\"\" (uses {p['evidence_ref'] or 'no evidence'})"
-         for i, p in enumerate(pairs)]
-    )
+    # Format claims with multi-evidence references
+    formatted_pairs = "\n".join([
+        f"{i+1}. Claim: \"\"\"{p['hypothesis']}\"\"\" "
+        f"(uses {', '.join(p['evidence_refs']) if p['evidence_refs'] else 'no evidence'})"
+        for i, p in enumerate(pairs)
+    ])
+
+    # Language-specific instructions
+    if getattr(settings, "PDF_LANG_IS_SWE", False):
+        language_instruction = (
+            "För varje påstående, avgör om bevisen **stödjer**, **motsäger** "
+            "eller **inte är relaterade till** påståendet."
+        )
+    else:
+        language_instruction = (
+            "For each claim, determine whether the evidence **supports**, **contradicts**, "
+            "or is **unrelated** to the claim."
+        )
 
     return f"""
-You are a factual verification expert.
+You are a domain expert in factual consistency checking.
 
-Below are several pieces of EVIDENCE labeled A, B, C, etc.,
-followed by a list of CLAIMS. Each claim specifies which evidence it relates to.
+Below are multiple EVIDENCE sections (A, B, C, ...) and several CLAIMS.
+Each claim specifies which evidence references it relies on.
 
-Your task:
-For each claim, classify the relationship between the evidence and the claim as:
-- "entailment" (the evidence supports the claim)
-- "contradiction" (the evidence disproves the claim)
-- "neutral" (the evidence is unrelated)
+{language_instruction}
 
-Return an array of objects exactly following this schema:
+Output a **structured array** where each element is an object:
 - label: one of ["entailment", "contradiction", "neutral"]
 - confidence: a float between 0 and 1
 
-Examples:
+Interpretation:
+- "entailment" → Evidence clearly supports the claim.
+- "contradiction" → Evidence clearly conflicts with the claim.
+- "neutral" → Evidence is unrelated or insufficient to decide.
 
+Examples:
 Evidence: "Water freezes at 0°C under normal conditions."
 Claim: "Water becomes solid at 0°C."
-Output:
-{{"label": "entailment", "confidence": 0.97}}
+→ {{ "label": "entailment", "confidence": 0.97 }}
 
 Evidence: "The Earth revolves around the Sun."
 Claim: "The Sun revolves around the Earth."
-Output:
-{{"label": "contradiction", "confidence": 1.0}}
+→ {{ "label": "contradiction", "confidence": 1.0 }}
 
 Evidence: "The Moon has craters."
 Claim: "The Moon is made of cheese."
-Output:
-{{"label": "neutral", "confidence": 0.99}}
+→ {{ "label": "neutral", "confidence": 0.99 }}
 
 ### EVIDENCE TEXTS ###
 {formatted_evidence}
@@ -189,75 +265,29 @@ Output:
 ### CLAIMS ###
 {formatted_pairs}
 
-Return your output as an array of objects following the schema above.
+Return your output as an array of objects that strictly follow the schema.
 """
 
 
-def load_entailment_batch_prompt_v2_old(evidence_texts: dict, pairs: list[dict]) -> str:
-    """
-    Compose a prompt that references evidence symbolically to avoid duplication.
-    evidence_texts: { "Evidence A": "...", "Evidence B": "..." }
-    pairs: [{ "evidence_ref": "Evidence A", "hypothesis": "..." }, ...]
-    """
-    # --- Format the evidence section ---
-    formatted_evidence = "\n".join(
-        [f"{ref}: \"\"\"{text}\"\"\"" for ref, text in evidence_texts.items()]
-    )
+def load_evidence_checker_system_prompt() -> str:
+    """System prompt for EvidenceCheckerNode (single and batch)."""
+    from shared.config import settings
 
-    # --- Format the claim section ---
-    formatted_pairs = "\n".join(
-        [f"{i+1}. Claim: \"\"\"{p['hypothesis']}\"\"\" (uses {p['evidence_ref'] or 'no evidence'})"
-         for i, p in enumerate(pairs)]
-    )
-
-    return f"""
-You are a factual verification expert.
-
-Below are several pieces of EVIDENCE labeled A, B, C, etc.,
-followed by a list of CLAIMS. Each claim specifies which evidence it relates to.
-
-Your task:
-For each claim, classify the relationship between the evidence and the claim as:
-- "entailment" (the evidence supports the claim)
-- "contradiction" (the evidence disproves the claim)
-- "neutral" (the evidence is unrelated)
-
-Respond strictly in **JSON array** form, where each element corresponds
-to the claim in order and has the fields:
-{{
-  "label": one of ["entailment", "contradiction", "neutral"],
-  "confidence": a float between 0 and 1
-}}
-
-Examples:
-
-Evidence: "Water freezes at 0°C under normal conditions."
-Claim: "Water becomes solid at 0°C."
-Output:
-{{"label": "entailment", 
-  "confidence": 0.97
-}}
-
-Evidence: "The Earth revolves around the Sun."
-Claim: "The Sun revolves around the Earth."
-Output:
-{{"label": "contradiction", 
-  "confidence": 1.0
-}}
-
-Evidence: "The Moon has craters."
-Claim: "The Moon is made of cheese."
-Output:
-{{"label": "neutral", 
-  "confidence": 0.99
-}}
-
-### EVIDENCE TEXTS ###
-{formatted_evidence}
-
-### CLAIMS ###
-{formatted_pairs}
-
-Now analyze all claims and output a JSON array.
-"""
-
+    if getattr(settings, "PDF_LANG_IS_SWE", False):
+        return (
+            "Du är en expert på faktagranskning och textuell semantisk analys. "
+            "Ditt uppdrag är att avgöra om ett bevisavsnitt **stödjer**, **motsäger** "
+            "eller **inte är relaterat till** ett givet påstående. "
+            "Du ska inte skapa nya slutsatser – endast analysera sambandet mellan "
+            "påståendet och den tillhandahållna evidenstexten.\n\n"
+            "Fokusera på semantisk mening och faktuell överensstämmelse, "
+            "inte på ordmatchning eller ytlig likhet."
+        )
+    else:
+        return (
+            "You are a factual verification specialist trained in textual entailment. "
+            "Your task is to determine whether the given evidence **supports**, **contradicts**, "
+            "or is **unrelated to** a provided claim. "
+            "Do not generate explanations or new information — only assess the relationship.\n\n"
+            "Focus on semantic meaning and factual consistency, not word overlap or tone."
+        )

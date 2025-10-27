@@ -68,28 +68,38 @@ class VectorDBClient:
 
         self.client.upsert(collection_name=self.collection_name, points=points)
 
-    def search(self, q_vector: List[float], top_k: int = None):
+    def search(self, q_vector: List[float], top_k: int = 1) -> List[Dict[str, Any]]:
         """
-        Search Qdrant for nearest neighbors.
+        Search Qdrant for nearest neighbors using the new query_points API.
         Returns list of dicts compatible with RetrievalOutput.
         """
         top_k = top_k or settings.TOP_K
-        hits = self.client.search(  # TODO: Update this to use query_points method
-            collection_name=self.collection_name,
-            query_vector=q_vector,
-            limit=top_k,
-        )
+
+        if not q_vector:
+            print("[WARN] Empty query vector provided to VectorDBClient.search()")
+            return []
+
+        try:
+            query_result = self.client.query_points(
+                collection_name=self.collection_name,
+                query=q_vector,
+                limit=top_k,
+            )
+        except Exception as e:
+            print(f"[ERROR] Qdrant query_points() failed: {e}")
+            return []
 
         results = []
-        for h in hits:
+        for h in getattr(query_result, "points", []):
+            payload = h.payload or {}
             results.append(
                 {
-                    "chunk_id": h.payload.get("chunk_id"),  # human-readable
+                    "chunk_id": payload.get("chunk_id"),
                     "score": h.score,
-                    "text": h.payload.get("text", ""),
+                    "text": payload.get("text", ""),
                     "metadata": {
                         k: v
-                        for k, v in h.payload.items()
+                        for k, v in payload.items()
                         if k not in {"chunk_id", "text"}
                     },
                 }

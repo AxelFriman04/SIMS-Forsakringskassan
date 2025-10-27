@@ -16,10 +16,13 @@ class IngestNode:
         metadata = metadata or {}
         doc_id = metadata.get("doc_id") or str(uuid.uuid4())
 
-        # --- Step 1: Parse PDF into structured chunks ---
+        # --- Step 1: Parse PDF ---
         chunks = parse_pdf(pdf_path, doc_id=doc_id)
 
-        # Extract the summary metadata
+        # --- Step 2: Filter out empty or too-short chunks ---
+        chunks = [c for c in chunks if len(c["text"].strip()) > 50]
+
+        # Extract summary metadata
         summary_meta = {}
         if chunks and chunks[-1]["chunk_id"].endswith("::summary"):
             summary_meta = chunks.pop(-1)["metadata"]
@@ -29,7 +32,7 @@ class IngestNode:
         num_empty_pages = summary_meta.get("num_empty_pages", 0)
         total_chars = summary_meta.get("total_chars", 0)
 
-        # --- Step 2: Compute M1 Metrics ---
+        # --- Step 3: Compute M1 Metrics ---
 
         # Parsing Success Rate: ratio of pages that produced text
         parsing_success_rate = (
@@ -52,6 +55,11 @@ class IngestNode:
             complete_chunks / num_chunks if num_chunks > 0 else 0.0
         )
 
+        # Add language and section metadata globally
+        for c in chunks:
+            c["metadata"]["language"] = "sv"  # TODO: Add language support
+            c["metadata"]["doc_type"] = "regulation"
+
         # Compute embeddings and evaluate embedding fidelity
         texts = [c["text"] for c in chunks]
         embeddings = embed_texts(texts)
@@ -68,7 +76,7 @@ class IngestNode:
         else:
             embedding_fidelity = 1.0  # trivial single-embedding case
 
-        # --- Step 3: Log M1 metrics ---
+        # --- Step 4: Log M1 metrics ---
         m1_metrics = {
             "type": "ingest",
             "doc_id": doc_id,
@@ -81,7 +89,7 @@ class IngestNode:
             "metadata_completeness": metadata_completeness,
         }
 
-        # --- Step 4: Upsert chunks into Qdrant ---
+        # --- Step 5: Upsert chunks into Qdrant ---
         self.vdb.upsert([
             (
                 c["chunk_id"],
@@ -94,16 +102,19 @@ class IngestNode:
             for c, emb in zip(chunks, embeddings)
         ])
 
-        # --- Step 5: Update Graph State ---
+        # --- Step 6: Update Graph State ---
         ingest_snapshot = {
             "doc_id": doc_id,
             "num_chunks": num_chunks,
             "num_pages": num_pages,
             "total_chars": total_chars,
+            "metadata": {
+                "model": settings.EMBEDDING_MODEL
+            },
         }
 
         self.state.last_ingest_snapshot = ingest_snapshot
-        self.state.metrics_ingestion = m1_metrics
+        # self.state.metrics_ingestion = m1_metrics
         self.state.log_metric(m1_metrics)
 
         return ingest_snapshot

@@ -75,8 +75,8 @@ def clear_results():
 if __name__ == "__main__":
     # print_db()
 
-    print_latest_result()
+    # print_latest_result()
 
     # clear_results()
 
-    #regex_func()
+    regex_func()

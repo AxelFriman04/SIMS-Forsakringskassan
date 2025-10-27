@@ -15,8 +15,8 @@ def parse_claims(raw_output: str) -> List[Dict[str, str]]:
     # Try to parse as JSON
     try:
         data = json.loads(raw_output)
-        claims = [{"text": c["text"].strip()} for c in data if isinstance(c, dict) and "text" in c and c["text"].strip()]
-        return claims
+        claims = [{"text": c.get("text", "").strip()} for c in data if isinstance(c, dict) and c.get("text")]
+        return [c for c in claims if c["text"]]
     except json.JSONDecodeError:
         pass
 

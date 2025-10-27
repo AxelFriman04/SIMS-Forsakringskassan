@@ -1,17 +1,24 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Any, Optional
 from openai import OpenAI
 from shared.config import settings
 import random
 
 
 class LLM:
-    def __init__(self, api_key: str | None = None, model: str | None = None):
-        self.client = OpenAI(api_key=api_key or settings.OPENAI_API_KEY)
+    def __init__(self, api_key: str = settings.OPENAI_API_KEY, model: str | None = None):
+        self.client = OpenAI(api_key=api_key)
         self.model = model or settings.LLM_MODEL
 
-    def complete(self, prompt: str, max_tokens: int = 512) -> Dict:
+    def complete(
+        self,
+        prompt: str,
+        structured: bool = False,
+        schema: Optional[dict] = None,
+        max_tokens: int = 8000,
+        system_prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Call OpenAI chat/completions endpoint.
         Returns standardized dict with:
@@ -20,8 +27,6 @@ class LLM:
           - logprobs: list[float] (token-level logprobs, if available)
           - generator_metadata: dict with tokens, model id, etc.
         """
-
-        print("Max tokens in LLM set to: ", max_tokens)
 
         if settings.USE_DUMMY_LLM:
             # Fake response for testing pipeline flow
@@ -37,35 +42,56 @@ class LLM:
                 }
             }
 
-        # ---- Real OpenAI call ----
-        response = self.client.chat.completions.create(
+        # ---- OpenAI call ----
+        system_message = (
+            {"role": "system", "content": system_prompt}
+            if system_prompt
+            else {"role": "system", "content": "You are a helpful assistant that answers using provided evidence and citations by chunk id."}
+        )
+        response_kwargs = dict(
             model=self.model,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that answers with citations by chunk id when available."},
+                system_message,
                 {"role": "user", "content": prompt},
             ],
-            max_completion_tokens=max_tokens
-            # logprobs=True  # request logprobs if supported
+            max_completion_tokens=max_tokens,
+            # logprobs=True # Use if supported
         )
 
-        print("LLM raw response:", response)
+        # ---- Structured output (JSON schema enforcement) ----
+        if structured:
+            if schema:
+                response_kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema.get("name", "structured_output"),
+                        "strict": True,
+                        "schema": schema,
+                    },
+                }
+            else:
+                response_kwargs["response_format"] = {"type": "json_object"}
 
-        choice = response.choices[0].message.content
-        usage = response.usage
+        response = self.client.chat.completions.create(**response_kwargs)
 
-        # Extract token-level logprobs if the API provides them
+        # --- Parse result ---
+        if structured and hasattr(response.choices[0].message, "parsed"):
+            content = response.choices[0].message.parsed
+        else:
+            content = response.choices[0].message.content or ""
+
+        usage = getattr(response, "usage", None)
         token_logprobs: List[float] = []
         if hasattr(response.choices[0], "logprobs") and response.choices[0].logprobs:
             for t in response.choices[0].logprobs.content:
-                if "logprob" in t:  # OpenAI logprob object
+                if "logprob" in t:
                     token_logprobs.append(t["logprob"])
 
         return {
-            "answer": choice,
-            "declared_citations": [],  # kept for compatibility, extraction happens downstream
+            "answer": content,
             "logprobs": token_logprobs,
-            "generator_metadata": {
+            "metadata": {
                 "tokens": usage.total_tokens if usage else None,
                 "model": self.model,
-            }
+            },
         }

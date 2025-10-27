@@ -26,11 +26,17 @@ class GraphState:
     metrics_claim_extraction: Dict[str, Any] = field(default_factory=dict)
     metrics_verification: Dict[str, Any] = field(default_factory=dict)
 
+    # --- Linguistic / Style Evaluation ---
+    metrics_style: Dict[str, Any] = field(default_factory=dict)
+
+    # Accuracy Heuristics
+    metrics_heuristics: Dict[str, Any] = field(default_factory=dict)
+
     # Root Cause Classifier
     root_cause: Dict[str, Any] = field(default_factory=dict)
     verdict: str = ""
     metrics_root_cause: Dict[str, Any] = field(default_factory=dict)
-    metrics_pipeline: Dict[str, Any] = field(default_factory=dict)
+    metrics_pipeline: Dict[str, Any] = field(default_factory=dict)  # Can be used later for debugging
 
     def log_metric(self, metric: Dict[str, Any], stage: str = "claim_extraction"):
         """Adds metrics to the correct stage dictionary safely."""
