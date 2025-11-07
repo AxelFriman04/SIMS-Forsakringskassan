@@ -210,8 +210,15 @@ class EvidenceCheckerNode:
         # --- Step 5: Compute metrics
         entailments = sum(1 for c in claims if c["entailment"] == "entailment")
         contradictions = sum(1 for c in claims if c["entailment"] == "contradiction")
-        avg_conf = sum(c["confidence"] for c in claims) / len(claims) if claims else 0.0
-        avg_heur_conf = sum(c["heuristics"]["heuristic_confidence"] for c in claims) / len(claims) if claims else 0.0
+        avg_conf = sum(c.get("confidence", 0.0) for c in claims) / len(claims) if claims else 0.0
+
+        # Safely compute heuristic average (if any claim has it)
+        heur_list = [c.get("heuristics", {}) for c in claims if c.get("heuristics")]
+        avg_heur_conf = (
+            sum(h.get("heuristic_confidence", 0.0) for h in heur_list) / len(heur_list)
+            if heur_list else 0.0
+        )
+
         metrics = {
             "entailment_ratio": entailments / len(claims) if claims else 0.0,
             "contradiction_ratio": contradictions / len(claims) if claims else 0.0,
@@ -275,9 +282,40 @@ class EvidenceCheckerNode:
                 "contradiction_ratio": 0.0,
                 "avg_confidence": 0.0
             }, stage="verification")
+            # log an empty heuristics block for consistency
+            state.log_metric({}, stage="heuristics")
             return state
 
         result = self.check_evidence_batch(claims)
         state.verified_claims = result["claims"]
-        state.log_metric(result["metrics"], stage="verification")
+        # Add entailment model metadata to the metrics dict
+        result_metrics = {
+            **result["metrics"],
+            "entailment_metadata": {
+                "model": settings.ENTAILMENT_LLM_MODEL
+            }
+        }
+
+        # Log metrics (with metadata)
+        state.log_metric(result_metrics, stage="verification")
+        # --- NEW: Aggregate + log heuristics across verified claims ---
+        heuristics_list = [c.get("heuristics", {}) for c in state.verified_claims if c.get("heuristics")]
+        if heuristics_list:
+            avg_heur_conf = sum(h.get("heuristic_confidence", 0.0) for h in heuristics_list) / len(heuristics_list)
+            avg_lexical = sum(h.get("lexical_overlap", 0.0) for h in heuristics_list) / len(heuristics_list)
+            avg_entity = sum(h.get("entity_match", 0.0) for h in heuristics_list) / len(heuristics_list)
+            avg_numeric = sum(h.get("numeric_match", 0.0) for h in heuristics_list) / len(heuristics_list)
+            avg_coverage = sum(h.get("coverage", 0.0) for h in heuristics_list) / len(heuristics_list)
+
+            state.log_metric({
+                "avg_heuristic_confidence": round(avg_heur_conf, 3),
+                "avg_lexical_overlap": round(avg_lexical, 3),
+                "avg_entity_match": round(avg_entity, 3),
+                "avg_numeric_match": round(avg_numeric, 3),
+                "avg_coverage": round(avg_coverage, 3),
+            }, stage="heuristics")
+        else:
+            # Keep shape stable even if no heuristics were computed
+            state.log_metric({}, stage="heuristics")
+
         return state

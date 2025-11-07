@@ -36,15 +36,16 @@ class Settings(BaseSettings):
 
     # === Run control flags ===
     RUN_INGEST: bool = False         # Only set to True when you want to parse + embed + upsert PDF
-    # RUN_RETRIEVE: bool = False
     RUN_GENERATE: bool = True
     USE_RE_RANK: bool = True
 
     """
         Compliance checker configs
     """
+    CLAIM_EXTRACT_MODEL: str = "gpt-5-nano"
     ENTAILMENT_LLM_MODEL: str = "gpt-5-nano"
     STYLE_EVAL_MODEL: str = "gpt-5-nano"
+    RELEVANCE_EVAL_MODEL: str = "gpt-5-nano"
 
     """
         Base settings

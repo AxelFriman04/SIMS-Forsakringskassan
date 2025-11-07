@@ -291,3 +291,63 @@ def load_evidence_checker_system_prompt() -> str:
             "Do not generate explanations or new information — only assess the relationship.\n\n"
             "Focus on semantic meaning and factual consistency, not word overlap or tone."
         )
+
+
+def load_answer_relevance_prompt(query: str, answer_text: str) -> str:
+    if getattr(settings, "PDF_LANG_IS_SWE", False):
+        return f"""
+Du är en expert på textanalys av juridiska svar.
+
+Bedöm om svaret nedan **direkt och fullständigt besvarar frågan**.
+
+Instruktioner:
+- Ange om frågan verkligen besvaras (true/false).
+- Bedöm hur relevant svaret är (0–1).
+- Bedöm hur väl svaret täcker alla delar av frågan (0–1).
+- Uppskatta hur stor andel av texten som är ovidkommande eller upprepande (0–1).
+- Lista saknade delar om några.
+- Lägg till korta anteckningar som motivering.
+
+FRÅGA:
+\"\"\"{query}\"\"\"
+
+SVAR:
+\"\"\"{answer_text}\"\"\"
+"""
+    else:
+        return f"""
+You are an expert legal text analyst.
+
+Evaluate whether the following answer **directly and completely answers** the user’s query.
+
+Instructions:
+- State whether the answer actually addresses the question (true/false).
+- Rate overall relevance (0–1).
+- Rate completeness (0–1).
+- Estimate redundancy ratio (0–1).
+- List missing elements if any.
+- Add short explanatory notes.
+
+QUERY:
+\"\"\"{query}\"\"\"
+
+ANSWER:
+\"\"\"{answer_text}\"\"\"
+"""
+
+
+def load_answer_relevance_system_prompt():
+    if getattr(settings, "PDF_LANG_IS_SWE", False):
+        return (
+            "Du är en analytisk assistent som utvärderar juridiska AI-svar. "
+            "Ditt mål är att bedöma hur väl ett svar adresserar en given fråga, "
+            "hur fullständigt det är och om det innehåller irrelevant information. "
+            "Svara strikt enligt det givna JSON-schemat."
+        )
+    else:
+        return (
+            "You are an analytical assistant evaluating AI-generated answers. "
+            "Your task is to judge how well a given answer addresses the query, "
+            "how complete it is, and whether it contains irrelevant content. "
+            "Respond strictly following the provided JSON schema."
+        )

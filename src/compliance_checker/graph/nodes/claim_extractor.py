@@ -4,6 +4,7 @@ import re
 import numpy as np
 import json
 
+from shared.config import settings
 from compliance_checker.graph.state import GraphState
 from compliance_checker.model.llm import LLM
 from compliance_checker.prompt.prompt_loader import load_claim_extraction_prompt, load_claim_extractor_system_prompt
@@ -19,7 +20,7 @@ class ClaimExtractorNode:
 
     def __init__(self, state: GraphState):
         self.state = state
-        self.llm = LLM()
+        self.llm = LLM(model=settings.CLAIM_EXTRACT_MODEL)
 
         # Structured schema for extraction
         self.claim_schema = {
@@ -116,7 +117,10 @@ class ClaimExtractorNode:
         self.state.claims = combined_claims
         self.state.log_metric({
             "claim_count": len(combined_claims),
-            "avg_match_score": float(np.mean([c["match_score"] for c in combined_claims]))
+            "avg_match_score": float(np.mean([c["match_score"] for c in combined_claims])),
+            "claim_extract_metadata": {
+                "model": settings.CLAIM_EXTRACT_MODEL,
+            }
         })
 
         return self.state

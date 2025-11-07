@@ -38,8 +38,10 @@ class RootCauseClassifierNode:
                   metrics_ingestion,
                   metrics_retrieval,
                   metrics_generation,
+                  metrics_style,
+                  metrics_relevance,
                   metrics_compliance,
-                  compliance_report,   -- may hold style later if you persist it
+                  compliance_report,
                   answer
                 FROM results
                 WHERE id = ?
@@ -56,9 +58,9 @@ class RootCauseClassifierNode:
             "ingestion": self._safe_json(row["metrics_ingestion"]),
             "retrieval": self._safe_json(row["metrics_retrieval"]),
             "generation": self._safe_json(row["metrics_generation"]),
+            "style": self._safe_json(row["metrics_style"]),
+            "relevance": self._safe_json(row["metrics_relevance"]),
             "compliance": self._safe_json(row["metrics_compliance"]),
-            # style is not yet persisted in your table; if you later store it inside compliance_report, you can pull it here.
-            "style": {},  # fallback (state-aware below)
             "answer": row["answer"] or "",
         }
 
@@ -146,6 +148,7 @@ class RootCauseClassifierNode:
         return score, issues
 
     # ---------- Stage scoring ----------
+    # TODO: Use real values instead of placeholder
     def _score_ingestion(self, m: Dict[str, Any]) -> Tuple[float, List[str]]:
         issues = []
         psr = self._nz(m.get("parsing_success_rate"), 1.0)          # [0..1]
@@ -166,6 +169,7 @@ class RootCauseClassifierNode:
     def _score_retrieval(self, m: Dict[str, Any]) -> Tuple[float, List[str]]:
         issues = []
         topk = m.get("topk_scores") or []
+        max_score = max(topk) if topk else 0.0
         mean_topk = self._mean(topk)
         gap = self._nz(m.get("topk_gap"), 0.0)
         distinct = int(m.get("distinct_source_count") or 0)
@@ -173,28 +177,49 @@ class RootCauseClassifierNode:
         rerank = self._nz(m.get("re_rank_delta"), 0.0)
         num_hits = int(m.get("num_hits") or 0)
 
-        # Score: good = high mean_topk, high overlap, more sources, small gap
+        # ---- Core scoring components ----
+        focus = gap / (gap + 0.25)  # S-curve-ish; 0.25 tunes knee
         comp = [
-            self._bounded(mean_topk),                    # 0..1 (assuming cosine-ish)
-            self._bounded(overlap),                      # 0..1
-            self._bounded(1.0 - min(gap, 1.0)),          # invert gap
-            self._bounded(min(distinct, 3)/3.0),         # 1 source=0.33, 2=0.67, 3+=1.0
-            self._bounded(min(num_hits, 5)/5.0),         # availability
+            self._bounded(max_score),               # peak match strength
+            self._bounded(mean_topk),               # general retrieval quality
+            self._bounded(overlap),                 # lexical / semantic alignment
+            self._bounded(focus),                   # reward larger gap
+            self._bounded(min(distinct, 3) / 3.0),  # source diversity
+            self._bounded(min(num_hits, 5) / 5.0),  # penalize zero results
         ]
-        score = self._bounded(self._mean(comp))
+        base_score = self._bounded(self._mean(comp))
 
+        # ---- Confidence boost/penalty based on max_score ----
+        # Range: [−0.2 .. +0.1]
+        if max_score >= 0.7:
+            boost_factor = 1.10  # strong top hit
+        elif max_score < 0.4:
+            boost_factor = 0.80  # weak top hit
+        else:
+            # interpolate linearly between 0.4–0.7 → 0.8–1.1
+            boost_factor = 0.8 + (max_score - 0.4) * (0.3 / 0.3)
+        score = self._bounded(base_score * boost_factor)
+
+        # ---- Diagnostics ----
         if distinct < 2: issues.append("Low source diversity in retrieval.")
-        if overlap < 0.25:
+        if overlap < 0.20:
             issues.append(
                 "Low lexical overlap between query and retrieved evidence — retriever may not fully understand query intent.")
         if overlap > 0.85:
             issues.append(
                 "High lexical overlap — retrieval may be overly keyword-based rather than semantically diverse.")
+        if max_score < 0.5:
+            issues.append(
+                "Low maximum retrieval score (< 0.5) — retrieved evidence may not be semantically relevant; "
+                "the source material may lack sufficient information for this query."
+            )
 
-        if gap > 0.06: issues.append("High top-k score gap — unstable ranking.")
-        if num_hits == 0: issues.append("No retrieval hits — answer may be unsupported.")
+        if gap < 0.15:
+            issues.append("Low top-k score gap — retriever may lack focus; important data might be missing.")
+        if num_hits == 0 or not topk:
+            return 0.0, ["No retrieval hits — answer may be unsupported."]
         if rerank > 0.1:
-            issues.append("Significant re-ranking delta — initial retrieval order may be unstable.")
+            issues.append("Large re-ranking adjustment — consider relying more on re-ranker or tuning base similarity.")
 
         return score, issues
 
@@ -206,7 +231,7 @@ class RootCauseClassifierNode:
         hall = m.get("preliminary_hallucinations_warnings") or []
         ans_len = int(m.get("answer_length") or 0)
 
-        # Heuristic: long answers are fine; penalize if explicit hallucination flags
+        # Heuristic: penalize if explicit hallucination flags
         base = 0.85
         if hall: base -= 0.15
         # very negative min logprob might indicate brittle spans (if available)
@@ -223,7 +248,6 @@ class RootCauseClassifierNode:
         return score, issues
 
     def _score_style(self, m: Dict[str, Any]) -> Tuple[float, List[str]]:
-        """Optional stage (present if StyleEvaluatorNode ran)."""
         issues = []
         if not m:
             return 0.5, ["No style evaluation captured."]
@@ -240,6 +264,31 @@ class RootCauseClassifierNode:
         # Tone is noted but not scored directly here
         return score, issues
 
+    def _score_relevance(self, m: Dict[str, Any]) -> Tuple[float, List[str]]:
+        """
+        Evaluates how well the generated answer aligns with the query intent
+        and avoids redundant or hallucinated content.
+        """
+        issues = []
+        rel_score = self._nz(m.get("relevance_score"), 0.0)
+        coverage = self._nz(m.get("coverage_score"), 0.0)
+        redundancy = self._nz(m.get("redundancy_ratio"), 0.0)
+        hallucination = self._nz(m.get("hallucination_risk"), 0.0)
+
+        # Combine scores (reward relevance/coverage, penalize redundancy/hallucination)
+        score = self._bounded(0.5 * rel_score + 0.3 * coverage - 0.1 * redundancy - 0.1 * hallucination)
+
+        if rel_score < 0.5:
+            issues.append("Low semantic relevance between query and answer.")
+        if coverage < 0.6:
+            issues.append("Incomplete coverage — answer may not fully address query intent.")
+        if redundancy > 0.4:
+            issues.append("Answer contains redundant or off-topic information.")
+        if hallucination > 0.3:
+            issues.append("Potential hallucination risk detected.")
+
+        return score, issues
+
     def _score_claim_extraction(self, m: Dict[str, Any]) -> Tuple[float, List[str]]:
         issues = []
         cc = int(m.get("claim_count") or 0)
@@ -250,7 +299,7 @@ class RootCauseClassifierNode:
         score = self._bounded(base)
 
         if cc == 0:
-            issues.append("No claims extracted — downstream verification impossible.")
+            return 0.0, ["No claims extracted — downstream verification impossible."]
         if avg_match < 0.6:
             issues.append("Low alignment between extracted claims and answer segments.")
 
@@ -289,12 +338,21 @@ class RootCauseClassifierNode:
             return "Non-Compliant", self._bounded(0.4 + 0.3 * confidence_hint)
         return "Severely Non-Compliant", self._bounded(0.35 + 0.3 * confidence_hint)
 
+    # TODO: Improve this to more specific recommendations rather then general
     def _recommendations(self, stage_issues: Dict[str, List[str]]) -> List[str]:
         recs = []
         if stage_issues.get("ingestion"):
             recs.append("Re-parse document with improved extractor; verify page coverage and metadata.")
         if stage_issues.get("retrieval"):
             recs.append("Increase source diversity, tune similarity thresholds, and consider re-ranking.")
+            for msg in stage_issues.get("retrieval", []):
+                if "low maximum retrieval score" in msg.lower():
+                    recs.append(
+                        "Knowledge base or retriever may lack relevant information — "
+                        "consider enriching indexed data or reformulating the query for better coverage."
+                    )
+                    break
+
         if stage_issues.get("generation"):
             recs.append("Constrain generation to retrieved context; enable stricter citation policies.")
         if stage_issues.get("style"):
@@ -307,6 +365,8 @@ class RootCauseClassifierNode:
             recs.append("Review retrieval breadth and ensure all relevant evidence is covered.")
         if stage_issues.get("consistency"):
             recs.append("Check for contradictory or unstable model reasoning across claims.")
+        if stage_issues.get("relevance"):
+            recs.append("Refine prompt or retrieval strategy to improve query–answer relevance and focus.")
 
         return recs
 
@@ -337,15 +397,16 @@ class RootCauseClassifierNode:
         retrieval_score, retr_issues = self._score_retrieval(m.get("retrieval", {}))
         generation_score, gen_issues = self._score_generation(m.get("generation", {}))
         style_score, style_issues = self._score_style(style_metrics)
+        relevance_score, rel_issues = self._score_relevance(m.get("relevance", {}))
         extract_score, extr_issues = self._score_claim_extraction((m.get("compliance", {}) or {}).get("claim_extraction", {}))
         verify_score, ver_issues = self._score_verification((m.get("compliance", {}) or {}).get("verification", {}))
-
 
         stage_scores = {
             "ingestion": ingestion_score,
             "retrieval": retrieval_score,
             "generation": generation_score,
             "style": style_score,
+            "relevance": relevance_score,
             "extraction": extract_score,
             "verification": verify_score,
         }
@@ -360,14 +421,15 @@ class RootCauseClassifierNode:
 
         # Overall score: emphasize verification + retrieval + generation
         overall = self._bounded(
-            0.32 * verify_score +
-            0.20 * retrieval_score +
+            0.28 * verify_score +
+            0.18 * retrieval_score +
             0.15 * generation_score +
-            0.12 * ingestion_score +
-            0.10 * extract_score +
-            0.04 * style_score +
-            0.04 * completion_score +
-            0.03 * consistency_score
+            0.12 * relevance_score +
+            0.10 * ingestion_score +
+            0.07 * extract_score +
+            0.05 * style_score +
+            0.03 * completion_score +
+            0.02 * consistency_score
         )
 
         # Confidence: coherence of stage scores (lower variance -> higher confidence)
@@ -386,6 +448,7 @@ class RootCauseClassifierNode:
             "retrieval": retr_issues,
             "generation": gen_issues,
             "style": style_issues,
+            "relevance": rel_issues,
             "extraction": extr_issues,
             "verification": ver_issues,
             "completion": completion_issues,
@@ -393,14 +456,15 @@ class RootCauseClassifierNode:
         }
         # Flatten prioritized issues (most critical first)
         priority = [
-            "verification",      # factual correctness
-            "retrieval",         # source diversity / grounding
-            "generation",        # model output quality
-            "ingestion",         # document completeness
-            "extraction",        # claim detection
-            "style",             # tone / clarity
-            "completion",        # overall answer coverage
-            "consistency"        # internal logical coherence
+            "verification",
+            "relevance",
+            "retrieval",
+            "generation",
+            "ingestion",
+            "extraction",
+            "style",
+            "completion",
+            "consistency",
         ]
 
         flat_issues: List[str] = []
@@ -428,6 +492,7 @@ class RootCauseClassifierNode:
                 "retrieval": m.get("retrieval", {}),
                 "generation": m.get("generation", {}),
                 "style": style_metrics,
+                "relevance": m.get("relevance", {}),
                 "compliance": m.get("compliance", {}),
             }
             if m.get("answer"):

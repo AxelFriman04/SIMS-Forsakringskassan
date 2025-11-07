@@ -70,8 +70,6 @@ class GenerateNode:
         # 2. Count tokens
         total_prompt_tokens = self.count_tokens(prompt, model=self.llm.model)
         max_tokens_estimate = self.compute_max_tokens(retrieval_snapshot)
-        print(f"[DRY RUN] Total prompt tokens: {total_prompt_tokens}")
-        print(f"[DRY RUN] Estimated max_tokens for generation: {max_tokens_estimate}")
 
         if dry_run:
             # Return a dummy response without calling the API
@@ -118,6 +116,7 @@ class GenerateNode:
 
         # citations extraction
         # declared_citations = re.findall(r"\[CITE:\s*(\w+)\]", answer)
+        # TODO: Fix so repetitions don't count
         declared_citations = re.findall(r"\[CITE:\s*([^\]]+)\]", answer)
 
         # hallucination warnings
@@ -137,5 +136,8 @@ class GenerateNode:
             },
             "generator_declared_citations": declared_citations,
             "answer_length": len(answer),
-            "preliminary_hallucinations_warnings": hallucination_warnings
+            "preliminary_hallucinations_warnings": hallucination_warnings,
+            "generator_metadata": {
+                "model": self.llm.model
+            }
         }

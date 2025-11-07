@@ -38,6 +38,9 @@ class GraphState:
     metrics_root_cause: Dict[str, Any] = field(default_factory=dict)
     metrics_pipeline: Dict[str, Any] = field(default_factory=dict)  # Can be used later for debugging
 
+    # --- Answer Relevance Evaluation ---
+    metrics_relevance: Dict[str, Any] = field(default_factory=dict)
+
     def log_metric(self, metric: Dict[str, Any], stage: str = "claim_extraction"):
         """Adds metrics to the correct stage dictionary safely."""
         stage_attr = f"metrics_{stage}"

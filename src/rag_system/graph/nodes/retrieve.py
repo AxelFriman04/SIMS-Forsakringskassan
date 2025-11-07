@@ -81,8 +81,8 @@ class RetrieveNode:
         snapshot = {
             "query": query,
             "topk": results,
-            "metadata": {
-                "rerank_model": rerank_model_used,
+            "rerank_metadata": {
+                "model": rerank_model_used,
             },
         }
 

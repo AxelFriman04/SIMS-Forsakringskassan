@@ -49,6 +49,6 @@ def run_pipeline(pdf_path: str, query: str, result_store: ResultsDBClient):
 
 if __name__ == "__main__":
     rs = ResultsDBClient()
-    query = "Hur länge kan man ha sjukpenning som föräldraledig?"
+    query = "När kan det bli aktuellt att bedöma oskäligt?"
     rag_state = run_pipeline(settings.PDF_PATH, query, rs)
     print("Pipeline finished. Answer:", rag_state.answer)

@@ -28,6 +28,7 @@ class ComplianceReportNode:
         """
         metrics = getattr(self.state, "metrics_pipeline", {}) or {}
         style_metrics = getattr(self.state, "metrics_style", {}) or {}
+        relevance_metrics = getattr(self.state, "metrics_relevance", {}) or {}
 
         # --- RAG models ---
         ingestion = metrics.get("ingestion", {}) or {}
@@ -46,23 +47,24 @@ class ComplianceReportNode:
                     ingestion.get("metadata", {}).get("model")
                     or settings.EMBEDDING_MODEL
                 ),
-                "retrieval_model": (
-                    retrieval.get("metadata", {}).get("model")
-                    or ingestion.get("metadata", {}).get("model")
-                ),
                 "generation_model": (
                     generation.get("metadata", {}).get("model")
                     or generation.get("generator_metadata", {}).get("model")
                     or settings.LLM_MODEL
                 ),
+                "rerank_model": (
+                    retrieval.get("rerank_metadata", {}).get("model")
+                    or settings.RERANK_MODEL
+                ),
             },
             "compliance_models": {
                 "claim_extraction_model": (
-                    claim_extraction.get("generator_metadata", {}).get("model")
+                    claim_extraction.get("claim_extract_metadata", {}).get("model")
                     or claim_extraction.get("metadata", {}).get("model")
+                    or settings.CLAIM_EXTRACT_MODEL
                 ),
                 "entailment_model": (
-                    verification.get("generator_metadata", {}).get("model")
+                    verification.get("entailment_metadata", {}).get("model")
                     or verification.get("metadata", {}).get("model")
                     or settings.ENTAILMENT_LLM_MODEL
                 ),
@@ -70,10 +72,10 @@ class ComplianceReportNode:
                     style_metrics.get("style_metadata", {}).get("model")
                     or settings.STYLE_EVAL_MODEL
                 ),
-                "rerank_model": (
-                        retrieval.get("metadata", {}).get("rerank_model")
-                        or settings.RERANK_MODEL
-                ),
+                "relevance_model": (
+                    relevance_metrics.get("relevance_metadata", {}).get("model")
+                    or settings.RELEVANCE_LLM_MODEL
+                )
             },
         }
 
@@ -84,6 +86,8 @@ class ComplianceReportNode:
         root_cause = getattr(self.state, "metrics_root_cause", {}) or {}
         metrics_pipeline = getattr(self.state, "metrics_pipeline", {}) or {}
         metrics_style = getattr(self.state, "metrics_style", {}) or {}
+        metrics_heuristics = getattr(self.state, "metrics_heuristics", {}) or {}
+        metrics_relevance = getattr(self.state, "metrics_relevance", {}) or {}
         claims = getattr(self.state, "claims", [])
         verified_claims = getattr(self.state, "verified_claims", [])
 
@@ -97,9 +101,14 @@ class ComplianceReportNode:
             "root_causes": root_cause.get("issues", []),
             "recommendations": root_cause.get("recommendations", []),
 
+            "stage_scores": root_cause.get("stage_scores", {}),
+            "summary": root_cause.get("verdict", "Summary unavailable"),
+
             "metrics": {
                 "pipeline": metrics_pipeline,
                 "style": metrics_style,
+                "heuristics": metrics_heuristics,
+                "relevance": metrics_relevance,
                 "root_cause": root_cause,
             },
 
@@ -131,8 +140,5 @@ class ComplianceReportNode:
         if getattr(settings, "DEBUG", False):
             print("\n=== 📘 COMPLIANCE REPORT ===")
             print(json.dumps(report, indent=2, ensure_ascii=False))
-
-        print("\n=== 📘 COMPLIANCE REPORT ===")
-        print(json.dumps(report, indent=2, ensure_ascii=False))
 
         return report

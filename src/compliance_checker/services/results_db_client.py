@@ -10,7 +10,7 @@ class ResultsDBClient:
     into the same SQLite database as the RAG results,
     using the same record ID.
     """
-
+    # TODO: This file is maybe unused
     def __init__(self, db_path: str = None):
         self.db_path = db_path or settings.DB_PATH
 
@@ -21,29 +21,30 @@ class ResultsDBClient:
         return conn
 
     def _ensure_compliance_columns(self, cursor):
-        """Check if compliance columns exist, and create them if missing."""
+        """Check if all compliance-related columns exist, and create them if missing."""
         cursor.execute("PRAGMA table_info(results)")
         columns = [col["name"] for col in cursor.fetchall()]
 
-        missing = []
-        if "metrics_compliance" not in columns:
-            missing.append("metrics_compliance")
-        if "metadata_compliance" not in columns:
-            missing.append("metadata_compliance")
+        expected_cols = [
+            "metrics_style",
+            "metrics_relevance",
+            "metrics_heuristics",
+            "metrics_compliance",
+            "metadata_compliance",
+        ]
 
-        for col in missing:
-            print(f"[DB] Adding missing column: {col}")
-            cursor.execute(f"ALTER TABLE results ADD COLUMN {col} TEXT")
+        for col in expected_cols:
+            if col not in columns:
+                print(f"[DB] Adding missing column: {col}")
+                cursor.execute(f"ALTER TABLE results ADD COLUMN {col} TEXT")
 
-        if not missing:
-            print("[DB] Compliance columns already exist.")
-
+    # ---------- UPDATE FUNCTION ----------
     def update_compliance_results(self, answer_id: int, state) -> None:
-        """Insert or update compliance results for the given RAG result entry."""
+        """Insert or update all compliance-related results for the given RAG result entry."""
         with self._connect() as conn:
             cursor = conn.cursor()
 
-            # Ensure compliance columns exist
+            # Ensure all new columns exist
             self._ensure_compliance_columns(cursor)
 
             # Verify record exists
@@ -60,29 +61,41 @@ class ResultsDBClient:
                 confidence = vr.get("avg_confidence", 0.0)
                 state.compliance_score = round(entailment * confidence, 3)
 
-            # Prepare compliance metrics
+            # --- Prepare all metrics ---
             compliance_metrics = {
-                "claim_extraction": state.metrics_claim_extraction,
-                "verification": state.metrics_verification,
-                "num_claims": len(state.claims),
-                "num_verified_claims": len(state.verified_claims),
-                "compliance_score": state.compliance_score,
+                "claim_extraction": getattr(state, "metrics_claim_extraction", {}),
+                "verification": getattr(state, "metrics_verification", {}),
+                "num_claims": len(getattr(state, "claims", [])),
+                "num_verified_claims": len(getattr(state, "verified_claims", [])),
+                "compliance_score": getattr(state, "compliance_score", 0.0),
             }
 
             compliance_metadata = {
-                "claims": state.claims,
-                "verified_claims": state.verified_claims,
+                "claims": getattr(state, "claims", []),
+                "verified_claims": getattr(state, "verified_claims", []),
             }
 
-            # Store results
+            # --- NEW METRICS FIELDS ---
+            metrics_style = getattr(state, "metrics_style", {})
+            metrics_relevance = getattr(state, "metrics_relevance", {})
+            metrics_heuristics = getattr(state, "metrics_heuristics", {})
+
+            # --- Build SQL update ---
             cursor.execute(
                 """
                 UPDATE results
-                SET metrics_compliance = ?,
+                SET
+                    metrics_style = ?,
+                    metrics_relevance = ?,
+                    metrics_heuristics = ?,
+                    metrics_compliance = ?,
                     metadata_compliance = ?
                 WHERE id = ?
                 """,
                 (
+                    json.dumps(metrics_style, ensure_ascii=False),
+                    json.dumps(metrics_relevance, ensure_ascii=False),
+                    json.dumps(metrics_heuristics, ensure_ascii=False),
                     json.dumps(compliance_metrics, ensure_ascii=False),
                     json.dumps(compliance_metadata, ensure_ascii=False),
                     answer_id,
